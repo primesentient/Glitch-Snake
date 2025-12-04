@@ -7,18 +7,14 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDKs -->
+    <!-- FIREBASE SDKs -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, getDoc, setDoc, addDoc, onSnapshot, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, collection, doc, getDoc, setDoc, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
-        // --- Configuration Logic ---
-        let firebaseConfig;
-        let appId;
-
-        // 1. YOUR HARDCODED LIVE CONFIG (The one you just provided)
-        const liveConfig = {
+        // --- 1. CONFIGURATION ---
+        const firebaseConfig = {
             apiKey: "AIzaSyAnbu1SU6ltV1RLVm9zQ5vRXcwEKGR0mTw",
             authDomain: "glitch-snake.firebaseapp.com",
             projectId: "glitch-snake",
@@ -27,239 +23,177 @@
             appId: "1:916329168570:web:491ee1980ba3f96cf70c83",
             measurementId: "G-MVR41LQKMH"
         };
-        const liveAppId = 'neon-serpent-live';
+        const appId = 'neon-serpent-live';
 
-        // 2. Logic to choose between Preview Env and Live
-        if (typeof __firebase_config !== 'undefined') {
-            try {
-                // We are in the AI Preview. Try to use its ephemeral keys.
-                firebaseConfig = JSON.parse(__firebase_config);
-                appId = __app_id;
-                // Safety check: If preview config is empty/broken, fallback to live
-                if (!firebaseConfig || !firebaseConfig.apiKey) {
-                    firebaseConfig = liveConfig;
-                    appId = liveAppId;
-                }
-            } catch(e) {
-                // If parsing fails, use live config
-                firebaseConfig = liveConfig;
-                appId = liveAppId;
-            }
-        } else {
-            // We are on GitHub/Netlify/Localhost. Always use Live Config.
-            firebaseConfig = liveConfig;
-            appId = liveAppId;
-        }
+        // --- 2. GLOBAL UI FUNCTIONS (Restored!) ---
         
-        // Initialize Firebase
-        let app, auth, db;
-        try {
-            app = initializeApp(firebaseConfig);
-            auth = getAuth(app);
-            db = getFirestore(app);
-        } catch (error) {
-            console.error("Firebase Initialization Failed:", error);
-        }
+        window.updateHubUI = function(scores, seasonId, myName, myHigh) {
+            const seasonEl = document.getElementById('hubSeason');
+            const highEl = document.getElementById('hubHighScore');
+            const list = document.getElementById('hubLeaderboard');
+            
+            if(seasonEl) seasonEl.innerText = seasonId.split('-')[1];
+            if(highEl) highEl.innerText = myHigh;
+            if(list) {
+                list.innerHTML = '';
+                if (!scores || scores.length === 0) {
+                    list.innerHTML = '<div class="text-gray-600 text-center italic mt-4">SECTOR EMPTY</div>';
+                    return;
+                }
+                scores.forEach((s, i) => {
+                    const isMe = s.username === myName;
+                    const row = document.createElement('div');
+                    row.className = `flex justify-between border-b border-green-900/30 pb-1 ${isMe ? 'text-white font-bold bg-green-900/30 px-1' : 'text-green-400'}`;
+                    row.innerHTML = `<span>${i+1}. ${s.username}</span><span>${s.score}</span>`;
+                    list.appendChild(row);
+                });
+            }
+        };
 
-        // --- State ---
+        // --- 3. FIREBASE INIT ---
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // --- 4. STATE ---
         let currentUser = null;
         let myUsername = localStorage.getItem('neon_snake_username');
         let mySecretKey = localStorage.getItem('neon_snake_key');
+
+        // --- 5. EXPORT BUTTON ACTIONS ---
         
-        // --- Auth & Startup ---
-        async function initAuth() {
-            if (!auth) return;
-            try {
-                // If a custom token is present (Preview Mode), try it first
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    try {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } catch (tokenError) {
-                        console.warn("Preview auth failed, trying anonymous:", tokenError);
-                        await signInAnonymously(auth);
-                    }
-                } else {
-                    // Live Mode: Anonymous Auth
-                    await signInAnonymously(auth);
-                }
-            } catch (e) {
-                console.error("Auth failed completely. Ensure 'Anonymous' is enabled in Firebase Console.", e);
-                const authMsg = document.getElementById('authMsg');
-                if(authMsg) authMsg.innerText = "DB CONNECTION FAILED. ENABLE ANONYMOUS AUTH IN FIREBASE CONSOLE.";
-            }
-        }
-
-        if (auth) {
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    currentUser = user;
-                    checkIdentityStatus();
-                    loadLeaderboard();
-                }
-            });
-            initAuth();
-        }
-
-        // --- Data Logic ---
-
-        // Helper: Generate Random Key (XXX-XXX-XXX)
-        function generateSecretKey() {
-            const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // No I, 1, O, 0 to avoid confusion
-            let result = "";
-            for (let i = 0; i < 9; i++) {
-                result += chars.charAt(Math.floor(Math.random() * chars.length));
-                if (i === 2 || i === 5) result += "-";
-            }
-            return result;
-        }
-
-        // 1. Register New Identity
-        window.registerUsername = async (name) => {
-            if (!currentUser) return { success: false, msg: "NET OFFLINE" };
+        window.doRegister = async () => {
+            const name = document.getElementById('regName').value;
+            const msg = document.getElementById('authMsg');
+            msg.innerText = "PROCESSING...";
             
+            if (!currentUser) { msg.innerText = "CONNECTING..."; return; }
+
             const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-            if (cleanName.length < 3 || cleanName.length > 12) return { success: false, msg: "INVALID LENGTH" };
+            if (cleanName.length < 3 || cleanName.length > 12) {
+                msg.innerText = "INVALID NAME (3-12 CHARS)";
+                return;
+            }
 
-            const usernameRef = doc(db, 'artifacts', appId, 'public', 'data', 'usernames', cleanName);
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'usernames', cleanName);
             
             try {
-                const docSnap = await getDoc(usernameRef);
-                if (docSnap.exists()) {
-                    return { success: false, msg: "IDENTITY ALREADY CLAIMED" };
+                const snap = await getDoc(docRef);
+                if (snap.exists()) {
+                    msg.innerText = "NAME TAKEN";
+                    return;
                 }
                 
-                const newKey = generateSecretKey();
+                const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; 
+                let newKey = "";
+                for (let i = 0; i < 9; i++) {
+                    newKey += chars.charAt(Math.floor(Math.random() * chars.length));
+                    if (i === 2 || i === 5) newKey += "-";
+                }
 
-                // Reserve name with Secret Key
-                await setDoc(usernameRef, {
+                await setDoc(docRef, {
                     uid: currentUser.uid,
                     secretKey: newKey,
                     created: serverTimestamp()
                 });
 
-                // Local Save
                 myUsername = cleanName;
                 mySecretKey = newKey;
                 localStorage.setItem('neon_snake_username', myUsername);
                 localStorage.setItem('neon_snake_key', mySecretKey);
                 
-                return { success: true, key: newKey, name: cleanName };
+                document.getElementById('generatedKeyDisplay').innerText = newKey;
+                document.getElementById('keyModal').classList.remove('hidden');
+
             } catch (e) {
                 console.error(e);
-                return { success: false, msg: "DB ERROR" };
+                msg.innerText = "DB ERROR: " + e.code;
             }
         };
 
-        // 2. Recover Identity
-        window.recoverIdentity = async (name, key) => {
-            if (!currentUser) return { success: false, msg: "NET OFFLINE" };
+        window.doRecover = async () => {
+            const name = document.getElementById('recName').value.toUpperCase();
+            const key = document.getElementById('recKey').value.toUpperCase();
+            const msg = document.getElementById('authMsg');
             
-            const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-            const cleanKey = key.toUpperCase().trim();
-            const usernameRef = doc(db, 'artifacts', appId, 'public', 'data', 'usernames', cleanName);
+            if (!currentUser) { msg.innerText = "CONNECTING..."; return; }
+            msg.innerText = "VERIFYING...";
 
             try {
-                const docSnap = await getDoc(usernameRef);
-                if (!docSnap.exists()) {
-                    return { success: false, msg: "IDENTITY NOT FOUND" };
-                }
-
-                const data = docSnap.data();
-                if (data.secretKey === cleanKey) {
-                    // Success
-                    myUsername = cleanName;
-                    mySecretKey = cleanKey;
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'usernames', name);
+                const snap = await getDoc(docRef);
+                
+                if (snap.exists() && snap.data().secretKey === key) {
+                    myUsername = name;
+                    mySecretKey = key;
                     localStorage.setItem('neon_snake_username', myUsername);
                     localStorage.setItem('neon_snake_key', mySecretKey);
-                    return { success: true };
+                    enterHub();
                 } else {
-                    return { success: false, msg: "INVALID NEURAL KEY" };
+                    msg.innerText = "INVALID CREDENTIALS";
                 }
             } catch (e) {
-                return { success: false, msg: "CONNECTION ERROR" };
+                console.error(e);
+                msg.innerText = "CONNECTION FAILED";
             }
         };
 
-        // 3. Submit Score
         window.submitScore = async (score) => {
-            if (!currentUser || !myUsername || !mySecretKey) return;
+            if (!currentUser || !myUsername) return;
             const seasonId = getCurrentSeason();
-            
             try {
-                // In a real app, backend rules would verify the key matches the username
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), {
                     username: myUsername,
                     score: score,
                     season: seasonId,
                     timestamp: Date.now()
                 });
-            } catch (e) {
-                console.error("Score upload failed", e);
-            }
+            } catch (e) { console.error(e); }
         };
 
-        // 4. Load Leaderboard
-        function loadLeaderboard() {
-            if (!db) return;
-            const seasonId = getCurrentSeason();
-            const scoresRef = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
-            
-            onSnapshot(scoresRef, (snapshot) => {
-                // 1. Fetch all scores for season
-                const allScores = [];
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.season === seasonId) {
-                        allScores.push(data);
-                    }
-                });
+        // --- 6. CORE LOGIC ---
 
-                // 2. Aggregate: Keep only the HIGHEST score per user
-                const userBestMap = new Map();
-                allScores.forEach(s => {
-                    if (!userBestMap.has(s.username)) {
-                        userBestMap.set(s.username, s);
-                    } else {
-                        // If we already have a score, check if this one is higher
-                        if (s.score > userBestMap.get(s.username).score) {
-                            userBestMap.set(s.username, s);
-                        }
-                    }
-                });
-
-                // 3. Convert back to array and sort
-                const uniqueScores = Array.from(userBestMap.values());
-                uniqueScores.sort((a, b) => b.score - a.score);
-                const top10 = uniqueScores.slice(0, 10);
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('statusIndicator').classList.replace('text-red-500', 'text-green-500');
+                document.getElementById('statusIndicator').innerText = "ONLINE";
                 
-                // 4. Find MY personal best from the map (or calculate it if not in top 10 logic, but map has it)
-                let myHigh = 0;
-                if (userBestMap.has(myUsername)) {
-                    myHigh = userBestMap.get(myUsername).score;
-                }
+                if (myUsername && mySecretKey) enterHub();
+                loadLeaderboard();
+            } else {
+                signInAnonymously(auth).catch(e => {
+                    document.getElementById('authMsg').innerText = "LOGIN ERROR: " + e.message;
+                });
+            }
+        });
 
-                window.updateHubUI(top10, seasonId, myUsername, myHigh);
+        function loadLeaderboard() {
+            const seasonId = getCurrentSeason();
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), (snap) => {
+                const allScores = [];
+                snap.forEach(d => {
+                    if (d.data().season === seasonId) allScores.push(d.data());
+                });
+
+                const bests = new Map();
+                allScores.forEach(s => {
+                    if (!bests.has(s.username) || s.score > bests.get(s.username).score) {
+                        bests.set(s.username, s);
+                    }
+                });
+
+                const sorted = Array.from(bests.values()).sort((a,b) => b.score - a.score).slice(0, 10);
+                const myHigh = bests.has(myUsername) ? bests.get(myUsername).score : 0;
+                
+                // Safe Call
+                if(window.updateHubUI) window.updateHubUI(sorted, seasonId, myUsername, myHigh);
             });
         }
 
         function getCurrentSeason() {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = now.getMonth(); 
-            const quarter = Math.floor(month / 3) + 1;
-            return `${year}-Q${quarter}`;
-        }
-
-        function checkIdentityStatus() {
-            if (!myUsername || !mySecretKey) {
-                // Show Login Screen
-                document.getElementById('authScreen').classList.remove('hidden');
-                document.getElementById('hubScreen').classList.add('hidden');
-                document.getElementById('gameUI').classList.add('hidden');
-            } else {
-                // Show Hub
-                enterHub();
-            }
+            const d = new Date();
+            return `${d.getFullYear()}-Q${Math.floor(d.getMonth()/3)+1}`;
         }
 
         function enterHub() {
@@ -269,270 +203,110 @@
             document.getElementById('opNameDisplay').innerText = myUsername;
             window.startDoomsdayClock();
         }
-
-        // Export globals
+        
         window.enterHub = enterHub;
-        window.checkIdentityStatus = checkIdentityStatus;
     </script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
-        :root {
-            --neon-green: #0f0;
-            --neon-red: #ff003c;
-            --neon-purple: #bc13fe;
-            --neon-blue: #00f3ff;
-            --bg-color: #050505;
-            --wall-color: #555;
-        }
-
-        body {
-            font-family: 'Share Tech Mono', monospace;
-            background-color: var(--bg-color);
-            color: var(--neon-green);
-            overflow: hidden;
-            touch-action: none;
-            user-select: none;
-        }
-
-        /* CRT Effect */
-        .scanlines {
-            background: linear-gradient(
-                to bottom,
-                rgba(255,255,255,0),
-                rgba(255,255,255,0) 50%,
-                rgba(0,0,0,0.2) 50%,
-                rgba(0,0,0,0.2)
-            );
-            background-size: 100% 4px;
-            pointer-events: none;
-            z-index: 50;
-        }
-
-        .crt-flicker {
-            animation: flicker 0.15s infinite;
-            pointer-events: none;
-            background: rgba(18, 16, 16, 0.1);
-        }
-
-        @keyframes flicker {
-            0% { opacity: 0.9; }
-            50% { opacity: 1.0; }
-            100% { opacity: 0.9; }
-        }
-
-        /* UI Elements */
-        .neon-box {
-            border: 1px solid var(--neon-green);
-            box-shadow: 0 0 10px rgba(0, 255, 0, 0.2), inset 0 0 20px rgba(0, 255, 0, 0.1);
-            background: rgba(0, 10, 0, 0.9);
-        }
-        
+        :root { --neon-green: #0f0; --neon-red: #ff003c; --bg-color: #050505; }
+        body { font-family: 'Share Tech Mono', monospace; background-color: var(--bg-color); color: var(--neon-green); overflow: hidden; touch-action: none; user-select: none; }
+        .scanlines { background: linear-gradient(to bottom, rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%); background-size: 100% 4px; pointer-events: none; z-index: 50; }
+        .neon-box { border: 1px solid var(--neon-green); box-shadow: 0 0 10px rgba(0,255,0,0.2); background: rgba(0,10,0,0.9); }
         .neon-text { text-shadow: 0 0 5px var(--neon-green); }
-        .neon-red { color: var(--neon-red); text-shadow: 0 0 5px var(--neon-red); }
-        .neon-border-red { border-color: var(--neon-red); box-shadow: 0 0 10px var(--neon-red); }
-
-        .btn-cyber {
-            background: #001100;
-            border: 1px solid var(--neon-green);
-            color: var(--neon-green);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        .btn-cyber:hover {
-            background: var(--neon-green);
-            color: black;
-            box-shadow: 0 0 15px var(--neon-green);
-        }
-        .btn-cyber:disabled {
-            border-color: #333;
-            color: #333;
-            background: black;
-            pointer-events: none;
-        }
-
-        .system-failure {
-            border: 2px solid red;
-            box-shadow: inset 0 0 50px rgba(255, 0, 0, 0.5);
-            filter: hue-rotate(45deg) contrast(1.2);
-        }
-
-        /* Scrollbar */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #000; }
-        ::-webkit-scrollbar-thumb { background: var(--neon-green); }
+        .btn-cyber { background: #001100; border: 1px solid var(--neon-green); color: var(--neon-green); transition: 0.2s; cursor: pointer; }
+        .btn-cyber:hover { background: var(--neon-green); color: black; box-shadow: 0 0 15px var(--neon-green); }
+        .system-failure { border: 2px solid red; filter: hue-rotate(45deg); }
+        ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: var(--neon-green); }
     </style>
 </head>
 <body class="h-screen w-full flex flex-col relative">
 
     <div class="absolute inset-0 scanlines fixed"></div>
-    <div class="absolute inset-0 crt-flicker fixed z-40 pointer-events-none mix-blend-overlay"></div>
+    <div id="statusIndicator" class="absolute top-2 left-2 z-50 text-xs font-bold text-red-500">OFFLINE</div>
 
-    <!-- 1. AUTH SCREEN -->
+    <!-- AUTH -->
     <div id="authScreen" class="absolute inset-0 z-50 flex items-center justify-center bg-black">
         <div class="w-full max-w-md p-6">
             <h1 class="text-4xl mb-8 text-center neon-text tracking-widest">NEURAL LINK</h1>
-            
-            <!-- Tabs -->
             <div class="flex mb-6 border-b border-green-900">
                 <button onclick="switchAuthTab('new')" id="tabNew" class="flex-1 pb-2 border-b-2 border-green-500 text-white">NEW IDENTITY</button>
                 <button onclick="switchAuthTab('recover')" id="tabRecover" class="flex-1 pb-2 border-b-2 border-transparent text-gray-600 hover:text-green-500">RECOVER</button>
             </div>
-
-            <!-- New Identity Form -->
             <div id="formNew" class="space-y-4">
                 <input type="text" id="regName" maxlength="12" placeholder="DESIRED CODENAME" class="w-full bg-black border border-green-700 p-3 text-center text-xl text-green-500 focus:outline-none focus:border-green-400">
                 <button onclick="doRegister()" class="btn-cyber w-full py-4 text-xl font-bold">JACK IN</button>
             </div>
-
-            <!-- Recover Form -->
             <div id="formRecover" class="space-y-4 hidden">
                 <input type="text" id="recName" maxlength="12" placeholder="EXISTING CODENAME" class="w-full bg-black border border-green-700 p-3 text-center text-xl text-green-500 focus:outline-none">
-                <input type="text" id="recKey" maxlength="11" placeholder="NEURAL KEY (XXX-XXX-XXX)" class="w-full bg-black border border-green-700 p-3 text-center text-xl text-green-500 focus:outline-none uppercase">
+                <input type="text" id="recKey" maxlength="11" placeholder="NEURAL KEY" class="w-full bg-black border border-green-700 p-3 text-center text-xl text-green-500 focus:outline-none uppercase">
                 <button onclick="doRecover()" class="btn-cyber w-full py-4 text-xl font-bold">RESTORE LINK</button>
             </div>
-            
-            <p id="authMsg" class="mt-4 text-center text-red-500 h-6"></p>
+            <p id="authMsg" class="mt-4 text-center text-red-500 font-bold h-6"></p>
         </div>
     </div>
 
-    <!-- 2. KEY REVEAL MODAL (One Time Only) -->
+    <!-- KEY MODAL -->
     <div id="keyModal" class="absolute inset-0 z-[60] flex items-center justify-center bg-black/95 hidden">
         <div class="neon-box p-8 max-w-lg w-full text-center border-red-500 shadow-red-500/50">
             <h2 class="text-3xl text-red-500 mb-2 font-bold">IDENTITY CREATED</h2>
-            <p class="text-sm text-gray-400 mb-6">THIS IS YOUR NEURAL LINK KEY. IF YOU LOSE IT, YOUR SCORE IS LOST FOREVER.</p>
-            
+            <p class="text-sm text-gray-400 mb-6">SAVE THIS KEY. IT IS YOUR ONLY LOGIN.</p>
             <div class="bg-gray-900 p-4 border border-gray-700 mb-6">
                 <div id="generatedKeyDisplay" class="text-3xl font-bold text-white tracking-widest select-all">...</div>
             </div>
-
             <button onclick="closeKeyModal()" class="btn-cyber w-full py-3">I HAVE COPIED IT</button>
         </div>
     </div>
 
-    <!-- 3. HUB TERMINAL -->
+    <!-- HUB -->
     <div id="hubScreen" class="absolute inset-0 z-40 bg-black hidden flex flex-col p-4 md:p-8">
-        
-        <!-- Top: Doomsday Clock -->
         <div class="w-full text-center mb-6">
             <div class="text-xs text-gray-500 tracking-[0.5em]">SEASON <span id="hubSeason">...</span> ENDS IN</div>
-            <div id="doomsdayClock" class="text-3xl md:text-5xl font-bold text-red-500 tracking-widest mt-2" style="text-shadow: 0 0 15px red;">00D : 00H : 00M : 00S</div>
+            <div id="doomsdayClock" class="text-3xl md:text-5xl font-bold text-red-500 tracking-widest mt-2">00D : 00H : 00M : 00S</div>
         </div>
-
         <div class="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden">
-            
-            <!-- Left: Operator Stats -->
             <div class="neon-box p-4 flex flex-col justify-between">
                 <div>
-                    <h3 class="text-gray-400 border-b border-green-900 pb-2 mb-4">OPERATOR STATUS</h3>
-                    <div class="mb-4">
-                        <div class="text-xs text-gray-500">IDENTITY</div>
-                        <div id="opNameDisplay" class="text-2xl text-white">UNKNOWN</div>
-                    </div>
-                    <div>
-                        <div class="text-xs text-gray-500">SEASON BEST</div>
-                        <div id="hubHighScore" class="text-4xl text-green-400">0</div>
-                    </div>
-                </div>
-                <div class="text-xs text-gray-600 mt-4">
-                    > CONNECTION: SECURE<br>
-                    > LATENCY: 12ms<br>
-                    > PACKET LOSS: 0%
+                    <div class="mb-4"><div class="text-xs text-gray-500">IDENTITY</div><div id="opNameDisplay" class="text-2xl text-white">UNKNOWN</div></div>
+                    <div><div class="text-xs text-gray-500">SEASON BEST</div><div id="hubHighScore" class="text-4xl text-green-400">0</div></div>
                 </div>
             </div>
-
-            <!-- Center: Action -->
             <div class="flex flex-col justify-center items-center space-y-6">
                 <button onclick="launchGame()" class="w-full aspect-square max-w-[200px] rounded-full border-4 border-green-500 flex items-center justify-center hover:bg-green-900/50 hover:scale-105 transition-all group relative overflow-hidden">
                     <div class="absolute inset-0 bg-green-500/20 animate-pulse"></div>
                     <span class="text-2xl font-bold tracking-widest z-10 group-hover:text-white">INITIALIZE<br>RUN</span>
                 </button>
-                <div class="text-center text-xs text-gray-500 max-w-xs">
-                    <p class="mb-2 text-white">WARNING:</p>
-                    <p>NO PAUSE PROTOCOLS.</p>
-                    <p>DRONES ACTIVE.</p>
-                    <p>GLITCH ZONES UNSTABLE.</p>
-                    <button onclick="openInstructions()" class="mt-4 border border-green-500/50 text-green-500/80 px-4 py-1 hover:bg-green-500 hover:text-black transition">SYSTEM MANUAL</button>
-                </div>
+                <button onclick="openInstructions()" class="mt-4 border border-green-500/50 text-green-500/80 px-4 py-1 hover:bg-green-500 hover:text-black transition">SYSTEM MANUAL</button>
             </div>
-
-            <!-- Right: Leaderboard -->
             <div class="neon-box p-4 flex flex-col h-full overflow-hidden">
                 <h3 class="text-gray-400 border-b border-green-900 pb-2 mb-2">GLOBAL RANKING</h3>
-                <div id="hubLeaderboard" class="flex-1 overflow-y-auto space-y-2 text-sm pr-2">
-                    <!-- Rows injected here -->
-                    <div class="text-center text-gray-600 mt-10">CONNECTING...</div>
-                </div>
+                <div id="hubLeaderboard" class="flex-1 overflow-y-auto space-y-2 text-sm pr-2"></div>
             </div>
-        </div>
-
-        <!-- Instructions Footer -->
-        <div class="mt-6 text-center text-xs text-gray-600 border-t border-gray-900 pt-4">
-            CONTROLS: ARROW KEYS / SWIPE. AVOID WALLS. HUNT DRONES (CRASH THEM). SURVIVE GLITCHES.
         </div>
     </div>
 
-    <!-- 3.5 INSTRUCTIONS MODAL -->
+    <!-- INSTRUCTIONS -->
     <div id="instructionsModal" class="absolute inset-0 z-[60] flex items-center justify-center bg-black/95 hidden">
         <div class="neon-box p-8 max-w-2xl w-full h-[80vh] flex flex-col">
-            <div class="flex justify-between items-center mb-6 border-b border-green-900 pb-4">
-                <h2 class="text-2xl neon-text font-bold">SYSTEM MANUAL</h2>
-                <button onclick="closeInstructions()" class="text-red-500 hover:text-white text-xl font-bold">X</button>
+            <h2 class="text-2xl neon-text font-bold mb-4">SYSTEM MANUAL</h2>
+            <div class="flex-1 overflow-y-auto text-sm space-y-4 text-gray-300">
+                <p>1. <span class="text-white">EAT:</span> White dots (+100). Blue dots (+500, Rare).</p>
+                <p>2. <span class="text-white">KILL:</span> Make Red Drones hit walls/your tail (+200).</p>
+                <p>3. <span class="text-white">SURVIVE:</span> Purple zones reverse controls. Avoid head-on drone collisions.</p>
             </div>
-            
-            <div class="flex-1 overflow-y-auto text-sm space-y-6 text-gray-300 pr-2">
-                <section>
-                    <h3 class="text-white font-bold mb-2 border-l-4 border-green-500 pl-2">OBJECTIVE</h3>
-                    <p>Survive the infinite grid. Consume energy pellets to grow. Outsmart security drones. Upload your high score to the Global Leaderboard before the season wipe.</p>
-                </section>
-                
-                <section>
-                    <h3 class="text-white font-bold mb-2 border-l-4 border-white pl-2">SCORING PROTOCOLS</h3>
-                    <ul class="list-disc pl-5 space-y-1">
-                        <li><span class="text-white">Energy Pellet (White Dot):</span> +100 PTS</li>
-                        <li><span class="text-blue-400">Mega Pellet (Blue Pulse):</span> +500 PTS. Spawns every 2-3 mins. Vanishes after 8s.</li>
-                        <li><span class="text-red-500">Drone Takedown:</span> +200 PTS. Crash drones into walls or your tail.</li>
-                    </ul>
-                </section>
-
-                <section>
-                    <h3 class="text-white font-bold mb-2 border-l-4 border-red-500 pl-2">THREATS</h3>
-                    <ul class="space-y-2">
-                        <li>
-                            <span class="text-red-500 font-bold">HUNTER DRONES (Red Triangles):</span>
-                            <p class="text-xs">They track your movement. If they touch your HEAD, game over. If they hit your TAIL or a WALL, they are destroyed.</p>
-                        </li>
-                        <li>
-                            <span class="text-purple-500 font-bold">GLITCH ZONES (Purple Static):</span>
-                            <p class="text-xs">Entering a glitch zone CORRUPTS your controls (Up becomes Down, etc.) for 5 seconds. Proceed with caution.</p>
-                        </li>
-                         <li>
-                            <span class="text-gray-500 font-bold">BARRIERS (Grey Walls):</span>
-                            <p class="text-xs">Static structures. Do not touch.</p>
-                        </li>
-                    </ul>
-                </section>
-            </div>
-            
             <button onclick="closeInstructions()" class="btn-cyber w-full py-3 mt-4">ACKNOWLEDGE</button>
         </div>
     </div>
 
-    <!-- 4. GAME UI -->
+    <!-- GAMEPLAY -->
     <div id="gameUI" class="absolute inset-0 hidden">
-        <!-- HUD -->
         <div class="absolute top-0 left-0 w-full flex justify-between p-4 z-20 pointer-events-none">
             <div class="bg-black/50 border-l-2 border-green-500 p-2 backdrop-blur">
                 <div class="text-3xl font-bold neon-text" id="scoreDisplay">0000</div>
                 <div class="text-xs text-red-500 mt-1 animate-pulse hidden" id="dangerWarning">⚠ DRONE PROXIMITY</div>
-                <div class="text-xs text-blue-400 mt-1 animate-pulse hidden" id="specialFoodWarning">⚠ MEGA PELLET DETECTED</div>
+                <div class="text-xs text-blue-400 mt-1 animate-pulse hidden" id="specialFoodWarning">⚠ MEGA PELLET</div>
             </div>
         </div>
-
-        <!-- Game Over Overlay -->
         <div id="gameOverScreen" class="absolute inset-0 flex items-center justify-center bg-black/90 z-30 hidden">
             <div class="text-center">
                 <h2 class="text-6xl text-red-600 font-bold mb-2 neon-red">FLATLINED</h2>
@@ -540,10 +314,7 @@
                 <button onclick="returnToHub()" class="btn-cyber px-8 py-3">RETURN TO HUB</button>
             </div>
         </div>
-
         <canvas id="gameCanvas" class="w-full h-full block bg-[#050505]"></canvas>
-
-        <!-- Mobile Controls -->
         <div class="absolute bottom-10 right-10 grid grid-cols-3 gap-2 md:hidden z-20 w-40 opacity-50">
             <div></div><button id="mUp" class="bg-gray-800/50 p-4 border border-green-500/30 rounded"><i class="fas fa-chevron-up"></i></button><div></div>
             <button id="mLeft" class="bg-gray-800/50 p-4 border border-green-500/30 rounded"><i class="fas fa-chevron-left"></i></button>
@@ -553,181 +324,188 @@
     </div>
 
     <script>
-        // --- AUTH UI LOGIC ---
-
-        window.switchAuthTab = (tab) => {
-            const btnNew = document.getElementById('tabNew');
-            const btnRec = document.getElementById('tabRecover');
-            const formNew = document.getElementById('formNew');
-            const formRec = document.getElementById('formRecover');
-            
-            document.getElementById('authMsg').innerText = "";
-
-            if (tab === 'new') {
-                btnNew.classList.add('border-green-500', 'text-white');
-                btnNew.classList.remove('border-transparent', 'text-gray-600');
-                btnRec.classList.remove('border-green-500', 'text-white');
-                btnRec.classList.add('border-transparent', 'text-gray-600');
-                formNew.classList.remove('hidden');
-                formRec.classList.add('hidden');
-            } else {
-                btnRec.classList.add('border-green-500', 'text-white');
-                btnRec.classList.remove('border-transparent', 'text-gray-600');
-                btnNew.classList.remove('border-green-500', 'text-white');
-                btnNew.classList.add('border-transparent', 'text-gray-600');
-                formRec.classList.remove('hidden');
-                formNew.classList.add('hidden');
-            }
-        };
-
-        window.doRegister = async () => {
-            const name = document.getElementById('regName').value;
-            const msg = document.getElementById('authMsg');
-            msg.innerText = "INITIALIZING...";
-            
-            const res = await window.registerUsername(name);
-            if (res.success) {
-                // Show Key Modal
-                document.getElementById('generatedKeyDisplay').innerText = res.key;
-                document.getElementById('keyModal').classList.remove('hidden');
-            } else {
-                msg.innerText = res.msg;
-            }
-        };
-
-        window.doRecover = async () => {
-            const name = document.getElementById('recName').value;
-            const key = document.getElementById('recKey').value;
-            const msg = document.getElementById('authMsg');
-            msg.innerText = "VERIFYING...";
-
-            const res = await window.recoverIdentity(name, key);
-            if (res.success) {
-                window.enterHub();
-            } else {
-                msg.innerText = res.msg;
-            }
-        };
-
-        window.closeKeyModal = () => {
-            document.getElementById('keyModal').classList.add('hidden');
-            window.enterHub();
-        };
-
-        // --- HUB UI LOGIC ---
-
-        window.openInstructions = () => {
-            document.getElementById('instructionsModal').classList.remove('hidden');
-        };
-
-        window.closeInstructions = () => {
-            document.getElementById('instructionsModal').classList.add('hidden');
-        };
-
-        window.updateHubUI = (scores, seasonId, myName, myHigh) => {
-            document.getElementById('hubSeason').innerText = seasonId.split('-')[1]; // Just "Q1"
-            document.getElementById('hubHighScore').innerText = myHigh;
-            
-            const list = document.getElementById('hubLeaderboard');
-            list.innerHTML = '';
-            
-            if (scores.length === 0) {
-                list.innerHTML = '<div class="text-gray-600 text-center italic mt-4">SECTOR EMPTY</div>';
-                return;
-            }
-
-            scores.forEach((s, i) => {
-                const isMe = s.username === myName;
-                const row = document.createElement('div');
-                row.className = `flex justify-between border-b border-green-900/30 pb-1 ${isMe ? 'text-white font-bold bg-green-900/30 px-1' : 'text-green-400'}`;
-                row.innerHTML = `
-                    <span>${i+1}. ${s.username}</span>
-                    <span>${s.score}</span>
-                `;
-                list.appendChild(row);
+        // UI Helpers
+        window.switchAuthTab = (t) => {
+            ['new','recover'].forEach(x => {
+                document.getElementById('tab'+(x.charAt(0).toUpperCase()+x.slice(1))).classList.toggle('text-white', x===t);
+                document.getElementById('tab'+(x.charAt(0).toUpperCase()+x.slice(1))).classList.toggle('border-green-500', x===t);
+                document.getElementById('form'+(x.charAt(0).toUpperCase()+x.slice(1))).classList.toggle('hidden', x!==t);
             });
+            document.getElementById('authMsg').innerText = "";
         };
-
+        window.closeKeyModal = () => { document.getElementById('keyModal').classList.add('hidden'); window.enterHub(); };
+        window.openInstructions = () => document.getElementById('instructionsModal').classList.remove('hidden');
+        window.closeInstructions = () => document.getElementById('instructionsModal').classList.add('hidden');
+        window.launchGame = () => { document.getElementById('hubScreen').classList.add('hidden'); document.getElementById('gameUI').classList.remove('hidden'); startGameEngine(); };
+        window.returnToHub = () => { document.getElementById('gameUI').classList.add('hidden'); document.getElementById('hubScreen').classList.remove('hidden'); };
+        
         window.startDoomsdayClock = () => {
-            const clockEl = document.getElementById('doomsdayClock');
-            
             const update = () => {
                 const now = new Date();
-                const currentMonth = now.getMonth();
-                const currentYear = now.getFullYear();
-                
-                // Determine end of current quarter
-                // Q1: March 31, Q2: June 30, Q3: Sept 30, Q4: Dec 31
-                let endMonth;
-                if (currentMonth < 3) endMonth = 2; // March (0-indexed)
-                else if (currentMonth < 6) endMonth = 5; // June
-                else if (currentMonth < 9) endMonth = 8; // Sept
-                else endMonth = 11; // Dec
-                
-                // Last moment of that month
-                const endDate = new Date(currentYear, endMonth + 1, 0, 23, 59, 59);
-                
-                const diff = endDate - now;
-                
-                if (diff <= 0) {
-                    clockEl.innerText = "SEASON WIPED";
-                    // If playing, kill game
-                    if (gameActive) gameOver(); 
-                    return;
-                }
-
-                const d = Math.floor(diff / (1000 * 60 * 60 * 24));
-                const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                const s = Math.floor((diff % (1000 * 60)) / 1000);
-
-                clockEl.innerText = `${pad(d)}D : ${pad(h)}H : ${pad(m)}M : ${pad(s)}S`;
-                
+                const q = Math.floor(now.getMonth()/3);
+                const end = new Date(now.getFullYear(), (q+1)*3, 0, 23, 59, 59);
+                const diff = end - now;
+                if(diff<=0) { document.getElementById('doomsdayClock').innerText = "SEASON WIPED"; return; }
+                const d = Math.floor(diff/86400000), h = Math.floor((diff%86400000)/3600000);
+                const m = Math.floor((diff%3600000)/60000), s = Math.floor((diff%60000)/1000);
+                document.getElementById('doomsdayClock').innerText = `${d<10?'0'+d:d}D : ${h<10?'0'+h:h}H : ${m<10?'0'+m:m}M : ${s<10?'0'+s:s}S`;
                 requestAnimationFrame(update);
             };
-            
-            function pad(n) { return n < 10 ? '0'+n : n; }
             update();
         };
 
-        window.launchGame = () => {
-            document.getElementById('hubScreen').classList.add('hidden');
-            document.getElementById('gameUI').classList.remove('hidden');
-            window.startGameEngine();
-        };
-
-        window.returnToHub = () => {
-            document.getElementById('gameUI').classList.add('hidden');
-            document.getElementById('hubScreen').classList.remove('hidden');
-        };
-
-        // --- GAME ENGINE (Adapted for new Flow) ---
-        
+        // Game Engine
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        
-        const TILE_SIZE = 25; 
-        const MAP_SIZE = 100;
-        const CAM_SMOOTH = 0.1;
-        
-        let gameActive = false;
-        let snake = [];
-        let velocity = {x:0, y:0};
-        let nextVelocity = {x:0, y:0};
-        let foods = []; // Now array
-        let specialFood = null; // {x, y, expireTime}
-        let nextSpecialFoodTime = 0;
-        let walls = [];
-        let drones = [];
-        let glitches = [];
-        let score = 0;
-        let camera = {x:0, y:0};
-        let lastTime = 0;
-        let gameSpeed = 10;
-        let timeSinceLastMove = 0;
-        
-        let inversionEndTime = 0;
-        let controlsInverted = false;
+        const TILE_SIZE=25, MAP_SIZE=100, CAM_SMOOTH=0.1;
+        let gameActive=false, snake=[], velocity={x:0,y:0}, nextVelocity={x:0,y:0}, foods=[], specialFood=null, nextSpecialFoodTime=0, walls=[], drones=[], glitches=[], score=0, camera={x:0,y:0}, lastTime=0, timeSinceLastMove=0, inversionEndTime=0, controlsInverted=false;
 
+        function startGameEngine() { resize(); resetGameData(); gameActive=true; requestAnimationFrame(gameLoop); }
+        function resetGameData() {
+            const startX=Math.floor(MAP_SIZE/2), startY=Math.floor(MAP_SIZE/2);
+            snake=[{x:startX,y:startY},{x:startX,y:startY+1},{x:startX,y:startY+2}];
+            velocity={x:0,y:-1}; nextVelocity={x:0,y:-1}; score=0;
+            document.getElementById('scoreDisplay').innerText="0000";
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            inversionEndTime=0; controlsInverted=false;
+            document.getElementById('gameUI').classList.remove('system-failure');
+            document.getElementById('dangerWarning').classList.add('hidden');
+            document.getElementById('specialFoodWarning').classList.add('hidden');
+            
+            walls=[]; for(let i=0;i<25;i++){
+                let wx=Math.floor(Math.random()*MAP_SIZE), wy=Math.floor(Math.random()*MAP_SIZE), l=Math.floor(Math.random()*4)+1, hor=Math.random()>0.5;
+                for(let j=0;j<l;j++) walls.push({x:wx+(hor?j:0), y:wy+(hor?0:j)});
+            }
+            foods=[]; for(let i=0;i<5;i++) spawnOneFood();
+            drones=[]; for(let i=0;i<5;i++) drones.push({x:Math.floor(Math.random()*MAP_SIZE),y:Math.floor(Math.random()*MAP_SIZE),moveTimer:0});
+            glitches=[]; for(let i=0;i<15;i++) glitches.push({x:Math.floor(Math.random()*MAP_SIZE),y:Math.floor(Math.random()*MAP_SIZE),w:Math.floor(Math.random()*3)+1,h:Math.floor(Math.random()*3)+1});
+            
+            nextSpecialFoodTime = Date.now() + 120000 + Math.random()*60000;
+            specialFood = null;
+            camera.x=(snake[0].x*TILE_SIZE)-(canvas.width/2); camera.y=(snake[0].y*TILE_SIZE)-(canvas.height/2);
+        }
 
-        window.startGame
+        function spawnOneFood() {
+            let placed=false;
+            while(!placed) {
+                let f={x:Math.floor(Math.random()*MAP_SIZE),y:Math.floor(Math.random()*MAP_SIZE)};
+                if(!walls.some(w=>w.x===f.x&&w.y===f.y)) { foods.push(f); placed=true; }
+            }
+        }
+
+        function gameLoop(ts) {
+            if(!gameActive) return;
+            const dt=(ts-lastTime)/1000; lastTime=ts; timeSinceLastMove+=dt;
+            
+            if(Date.now() > nextSpecialFoodTime && !specialFood) {
+                let placed=false, tries=0;
+                while(!placed && tries++<20) {
+                    let head=snake[0], sx=head.x+Math.floor(Math.random()*30)-15, sy=head.y+Math.floor(Math.random()*30)-15;
+                    if(sx>=0&&sx<MAP_SIZE&&sy>=0&&sy<MAP_SIZE&&!walls.some(w=>w.x===sx&&w.y===sy)) {
+                        specialFood={x:sx,y:sy,expireTime:Date.now()+8000}; placed=true;
+                        document.getElementById('specialFoodWarning').classList.remove('hidden');
+                    }
+                }
+                nextSpecialFoodTime=Date.now()+120000+Math.random()*60000;
+            }
+            if(specialFood && Date.now()>specialFood.expireTime) { specialFood=null; document.getElementById('specialFoodWarning').classList.add('hidden'); }
+
+            if(Date.now()<inversionEndTime) {
+                if(!controlsInverted) { controlsInverted=true; document.getElementById('gameUI').classList.add('system-failure'); document.getElementById('dangerWarning').innerText="⚠ CONTROLS INVERTED"; document.getElementById('dangerWarning').classList.remove('hidden','text-red-500'); document.getElementById('dangerWarning').classList.add('text-purple-500'); }
+            } else if(controlsInverted) {
+                controlsInverted=false; document.getElementById('gameUI').classList.remove('system-failure'); document.getElementById('dangerWarning').innerText="⚠ DRONE PROXIMITY"; document.getElementById('dangerWarning').classList.add('text-red-500','hidden');
+            }
+
+            if(timeSinceLastMove > 0.1) {
+                updatePhysics();
+                timeSinceLastMove=0;
+            }
+            updateCamera(); render(); requestAnimationFrame(gameLoop);
+        }
+
+        function updatePhysics() {
+            velocity=nextVelocity;
+            const head={x:snake[0].x+velocity.x, y:snake[0].y+velocity.y};
+            
+            if(head.x<0||head.x>=MAP_SIZE||head.y<0||head.y>=MAP_SIZE||walls.some(w=>w.x===head.x&&w.y===head.y)||snake.some(p=>p.x===head.x&&p.y===head.y)) { gameOver(); return; }
+            
+            glitches.forEach(g => { if(head.x>=g.x&&head.x<g.x+g.w&&head.y>=g.y&&head.y<g.y+g.h) inversionEndTime=Date.now()+5000; });
+            drones.forEach(d => { if(d.x===head.x&&d.y===head.y) gameOver(); });
+            if(!gameActive) return;
+
+            snake.unshift(head);
+            let eaten=false;
+            let fIdx = foods.findIndex(f=>f.x===head.x&&f.y===head.y);
+            if(fIdx!==-1) { score+=100; foods.splice(fIdx,1); spawnOneFood(); eaten=true; if(score%500===0) drones.push({x:Math.floor(Math.random()*MAP_SIZE),y:Math.floor(Math.random()*MAP_SIZE),moveTimer:0}); }
+            if(specialFood && head.x===specialFood.x && head.y===specialFood.y) { score+=500; specialFood=null; document.getElementById('specialFoodWarning').classList.add('hidden'); eaten=true; }
+            if(!eaten) snake.pop();
+            document.getElementById('scoreDisplay').innerText=score;
+
+            drones.forEach((d,i) => {
+                d.moveTimer++;
+                if(d.moveTimer>=2) {
+                    d.moveTimer=0;
+                    let dx=head.x-d.x, dy=head.y-d.y;
+                    if(Math.abs(dx)>Math.abs(dy)) d.x+=Math.sign(dx); else d.y+=Math.sign(dy);
+                    if(d.x===head.x&&d.y===head.y) { gameOver(); return; }
+                    if(d.x<0||d.x>=MAP_SIZE||d.y<0||d.y>=MAP_SIZE||walls.some(w=>w.x===d.x&&w.y===d.y)||snake.slice(1).some(p=>p.x===d.x&&p.y===d.y)) {
+                        drones.splice(i,1); score+=200; document.getElementById('scoreDisplay').innerText=score;
+                    }
+                }
+            });
+            
+            const danger = drones.some(d => Math.hypot(head.x-d.x, head.y-d.y)<10);
+            if(!controlsInverted) {
+                const w=document.getElementById('dangerWarning');
+                if(danger) w.classList.remove('hidden'); else w.classList.add('hidden');
+            }
+        }
+
+        function render() {
+            ctx.fillStyle='#050505'; ctx.fillRect(0,0,canvas.width,canvas.height);
+            ctx.save(); ctx.translate(-camera.x,-camera.y);
+            
+            ctx.strokeStyle='#112211'; ctx.lineWidth=1; ctx.beginPath();
+            const sc=Math.floor(camera.x/TILE_SIZE), ec=sc+(canvas.width/TILE_SIZE)+1, sr=Math.floor(camera.y/TILE_SIZE), er=sr+(canvas.height/TILE_SIZE)+1;
+            for(let x=sc;x<=ec;x++) { if(x>=0&&x<=MAP_SIZE) { ctx.moveTo(x*TILE_SIZE,camera.y); ctx.lineTo(x*TILE_SIZE,camera.y+canvas.height); } }
+            for(let y=sr;y<=er;y++) { if(y>=0&&y<=MAP_SIZE) { ctx.moveTo(camera.x,y*TILE_SIZE); ctx.lineTo(camera.x+canvas.width,y*TILE_SIZE); } }
+            ctx.stroke();
+            
+            ctx.strokeStyle='#00ff00'; ctx.lineWidth=2; ctx.strokeRect(0,0,MAP_SIZE*TILE_SIZE,MAP_SIZE*TILE_SIZE);
+            
+            ctx.fillStyle='#555'; walls.forEach(w=>ctx.fillRect(w.x*TILE_SIZE,w.y*TILE_SIZE,TILE_SIZE,TILE_SIZE));
+            ctx.fillStyle='rgba(188,19,254,0.2)'; glitches.forEach(g=>ctx.fillRect(g.x*TILE_SIZE,g.y*TILE_SIZE,g.w*TILE_SIZE,g.h*TILE_SIZE));
+            ctx.fillStyle='#fff'; ctx.shadowBlur=10; ctx.shadowColor='#fff'; foods.forEach(f=>{ctx.beginPath();ctx.arc(f.x*TILE_SIZE+12.5,f.y*TILE_SIZE+12.5,8,0,Math.PI*2);ctx.fill();});
+            if(specialFood){ ctx.fillStyle='#00f3ff'; ctx.shadowColor='#00f3ff'; ctx.shadowBlur=20; ctx.beginPath(); ctx.arc(specialFood.x*TILE_SIZE+12.5,specialFood.y*TILE_SIZE+12.5,12+Math.sin(Date.now()/100)*2,0,Math.PI*2); ctx.fill();}
+            
+            snake.forEach((p,i)=>{
+                ctx.fillStyle=i===0?'#0f0':'#0a0'; ctx.shadowBlur=i===0?15:0; ctx.shadowColor='#0f0';
+                ctx.fillRect(p.x*TILE_SIZE+1,p.y*TILE_SIZE+1,23,23);
+            });
+            
+            ctx.fillStyle='#ff003c'; ctx.shadowBlur=0;
+            drones.forEach(d=>{
+                const cx=d.x*TILE_SIZE+12.5, cy=d.y*TILE_SIZE+12.5;
+                ctx.beginPath(); ctx.moveTo(cx,cy-10); ctx.lineTo(cx+10,cy+10); ctx.lineTo(cx-10,cy+10); ctx.fill();
+            });
+            ctx.restore();
+        }
+
+        function gameOver() { gameActive=false; window.submitScore(score); document.getElementById('finalScore').innerText=score; document.getElementById('gameOverScreen').classList.remove('hidden'); }
+        function handleKey(k) {
+            let map={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0}};
+            let v=map[k]; if(!v) return;
+            if(controlsInverted) v={x:-v.x,y:-v.y};
+            if(v.x!==0 && velocity.x!==0) return; if(v.y!==0 && velocity.y!==0) return;
+            nextVelocity=v;
+        }
+        window.onkeydown=e=>{if(e.key.startsWith('Arrow')){e.preventDefault();handleKey(e.key)}};
+        document.getElementById('mUp').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowUp')};
+        document.getElementById('mDown').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowDown')};
+        document.getElementById('mLeft').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowLeft')};
+        document.getElementById('mRight').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowRight')};
+        function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+        window.onresize=resize;
+    </script>
+</body>
+</html>
