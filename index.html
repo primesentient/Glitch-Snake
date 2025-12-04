@@ -151,24 +151,35 @@
             } catch (e) { console.error(e); }
         };
 
+        // Share Function
+        window.shareScore = () => {
+            const finalScore = document.getElementById('finalScore').innerText;
+            const url = window.location.href;
+            const text = `I scored ${finalScore} in Glitch Snake: Future Protocol! Can you survive the wipe? Play now: ${url}`;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.getElementById('shareBtn');
+                const originalText = btn.innerText;
+                btn.innerText = "COPIED TO CLIPBOARD!";
+                setTimeout(() => btn.innerText = originalText, 2000);
+            }).catch(err => {
+                prompt("Copy your uplink:", text);
+            });
+        };
+
         // --- 6. CORE LOGIC ---
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 currentUser = user;
-                const statusEl = document.getElementById('statusIndicator');
-                if(statusEl) {
-                    statusEl.classList.remove('text-red-500');
-                    statusEl.classList.add('text-green-500');
-                    statusEl.innerText = "ONLINE";
-                }
+                document.getElementById('statusIndicator').classList.replace('text-red-500', 'text-green-500');
+                document.getElementById('statusIndicator').innerText = "ONLINE";
                 
                 if (myUsername && mySecretKey) enterHub();
                 loadLeaderboard();
             } else {
                 signInAnonymously(auth).catch(e => {
-                    const msgEl = document.getElementById('authMsg');
-                    if(msgEl) msgEl.innerText = "LOGIN ERROR: " + e.message;
+                    document.getElementById('authMsg').innerText = "LOGIN ERROR: " + e.message;
                 });
             }
         });
@@ -314,7 +325,10 @@
             <div class="text-center">
                 <h2 class="text-6xl text-red-600 font-bold mb-2 neon-red">FLATLINED</h2>
                 <div class="text-2xl text-green-400 mb-8">SCORE: <span id="finalScore">0</span></div>
-                <button onclick="returnToHub()" class="btn-cyber px-8 py-3">RETURN TO HUB</button>
+                <div class="flex flex-col gap-4 items-center">
+                    <button onclick="returnToHub()" class="btn-cyber px-8 py-3 w-64">RETURN TO HUB</button>
+                    <button id="shareBtn" onclick="shareScore()" class="btn-cyber px-8 py-3 w-64 border-blue-500 text-blue-400 hover:shadow-blue-500/50">BROADCAST SCORE</button>
+                </div>
             </div>
         </div>
         <canvas id="gameCanvas" class="w-full h-full block bg-[#050505]"></canvas>
@@ -396,7 +410,6 @@
             }
         }
 
-        // ADDED MISSING CAMERA FUNCTION HERE
         function updateCamera() {
             const targetX = (snake[0].x * TILE_SIZE) - (canvas.width / 2) + (TILE_SIZE/2);
             const targetY = (snake[0].y * TILE_SIZE) - (canvas.height / 2) + (TILE_SIZE/2);
@@ -431,7 +444,6 @@
                 updatePhysics();
                 timeSinceLastMove=0;
             }
-            // THIS CALL NOW WORKS
             updateCamera(); 
             render(); requestAnimationFrame(gameLoop);
         }
@@ -454,16 +466,34 @@
             if(!eaten) snake.pop();
             document.getElementById('scoreDisplay').innerText=score;
 
+            // Updated Drone Logic
             drones.forEach((d,i) => {
                 d.moveTimer++;
                 if(d.moveTimer>=2) {
                     d.moveTimer=0;
+                    let nextX = d.x;
+                    let nextY = d.y;
                     let dx=head.x-d.x, dy=head.y-d.y;
-                    if(Math.abs(dx)>Math.abs(dy)) d.x+=Math.sign(dx); else d.y+=Math.sign(dy);
-                    if(d.x===head.x&&d.y===head.y) { gameOver(); return; }
-                    if(d.x<0||d.x>=MAP_SIZE||d.y<0||d.y>=MAP_SIZE||walls.some(w=>w.x===d.x&&w.y===d.y)||snake.slice(1).some(p=>p.x===d.x&&p.y===d.y)) {
-                        drones.splice(i,1); score+=200; document.getElementById('scoreDisplay').innerText=score;
+                    
+                    // Determine intended move
+                    if(Math.abs(dx)>Math.abs(dy)) nextX+=Math.sign(dx); else nextY+=Math.sign(dy);
+
+                    // Check Tail Collision (DIE)
+                    if(snake.slice(1).some(p=>p.x===nextX&&p.y===nextY)) {
+                        drones.splice(i,1); score+=200; document.getElementById('scoreDisplay').innerText=score; return;
                     }
+
+                    // Check Wall Collision (BLOCK)
+                    const hitWall = nextX<0||nextX>=MAP_SIZE||nextY<0||nextY>=MAP_SIZE||walls.some(w=>w.x===nextX&&w.y===nextY);
+                    
+                    // Move if valid
+                    if (!hitWall) {
+                        d.x = nextX;
+                        d.y = nextY;
+                    }
+                    
+                    // Check Head Collision after move
+                    if(d.x===head.x&&d.y===head.y) { gameOver(); return; }
                 }
             });
             
@@ -512,7 +542,15 @@
             if(v.x!==0 && velocity.x!==0) return; if(v.y!==0 && velocity.y!==0) return;
             nextVelocity=v;
         }
-        window.onkeydown=e=>{if(e.key.startsWith('Arrow')){e.preventDefault();handleKey(e.key)}};
+        
+        // FIX: Added safety check for e.key to prevent "undefined" errors
+        window.onkeydown = e => {
+            if (e && e.key && e.key.startsWith('Arrow')) {
+                e.preventDefault();
+                handleKey(e.key);
+            }
+        };
+
         document.getElementById('mUp').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowUp')};
         document.getElementById('mDown').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowDown')};
         document.getElementById('mLeft').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowLeft')};
