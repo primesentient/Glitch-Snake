@@ -25,7 +25,7 @@
         };
         const appId = 'neon-serpent-live';
 
-        // --- 2. GLOBAL UI FUNCTIONS (Restored!) ---
+        // --- 2. GLOBAL UI FUNCTIONS ---
         
         window.updateHubUI = function(scores, seasonId, myName, myHigh) {
             const seasonEl = document.getElementById('hubSeason');
@@ -156,14 +156,19 @@
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 currentUser = user;
-                document.getElementById('statusIndicator').classList.replace('text-red-500', 'text-green-500');
-                document.getElementById('statusIndicator').innerText = "ONLINE";
+                const statusEl = document.getElementById('statusIndicator');
+                if(statusEl) {
+                    statusEl.classList.remove('text-red-500');
+                    statusEl.classList.add('text-green-500');
+                    statusEl.innerText = "ONLINE";
+                }
                 
                 if (myUsername && mySecretKey) enterHub();
                 loadLeaderboard();
             } else {
                 signInAnonymously(auth).catch(e => {
-                    document.getElementById('authMsg').innerText = "LOGIN ERROR: " + e.message;
+                    const msgEl = document.getElementById('authMsg');
+                    if(msgEl) msgEl.innerText = "LOGIN ERROR: " + e.message;
                 });
             }
         });
@@ -186,13 +191,11 @@
                 const sorted = Array.from(bests.values()).sort((a,b) => b.score - a.score).slice(0, 10);
                 const myHigh = bests.has(myUsername) ? bests.get(myUsername).score : 0;
                 
-                // Safe Call
                 if(window.updateHubUI) window.updateHubUI(sorted, seasonId, myUsername, myHigh);
             });
         }
 
         function getCurrentSeason() {
-            // Force start at Season 01
             return 'SEASON-01';
         }
 
@@ -393,6 +396,14 @@
             }
         }
 
+        // ADDED MISSING CAMERA FUNCTION HERE
+        function updateCamera() {
+            const targetX = (snake[0].x * TILE_SIZE) - (canvas.width / 2) + (TILE_SIZE/2);
+            const targetY = (snake[0].y * TILE_SIZE) - (canvas.height / 2) + (TILE_SIZE/2);
+            camera.x += (targetX - camera.x) * CAM_SMOOTH;
+            camera.y += (targetY - camera.y) * CAM_SMOOTH;
+        }
+
         function gameLoop(ts) {
             if(!gameActive) return;
             const dt=(ts-lastTime)/1000; lastTime=ts; timeSinceLastMove+=dt;
@@ -420,7 +431,9 @@
                 updatePhysics();
                 timeSinceLastMove=0;
             }
-            updateCamera(); render(); requestAnimationFrame(gameLoop);
+            // THIS CALL NOW WORKS
+            updateCamera(); 
+            render(); requestAnimationFrame(gameLoop);
         }
 
         function updatePhysics() {
