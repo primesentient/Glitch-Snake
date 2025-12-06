@@ -151,7 +151,6 @@
             } catch (e) { console.error(e); }
         };
 
-        // Share Function
         window.shareScore = () => {
             const finalScore = document.getElementById('finalScore').innerText;
             const url = window.location.href;
@@ -307,6 +306,7 @@
                 <p>1. <span class="text-white">EAT:</span> White dots (+100). Blue dots (+500, Rare).</p>
                 <p>2. <span class="text-white">KILL:</span> Lure Red Drones into your TAIL (+200).</p>
                 <p>3. <span class="text-white">SURVIVE:</span> Purple zones reverse controls. Avoid head-on drone collisions. Walls block drones.</p>
+                <p>4. <span class="text-white">CONTROLS:</span> Swipe anywhere or use on-screen buttons.</p>
             </div>
             <button onclick="closeInstructions()" class="btn-cyber w-full py-3 mt-4">ACKNOWLEDGE</button>
         </div>
@@ -332,11 +332,13 @@
             </div>
         </div>
         <canvas id="gameCanvas" class="w-full h-full block bg-[#050505]"></canvas>
-        <div class="absolute bottom-10 right-10 grid grid-cols-3 gap-2 md:hidden z-20 w-40 opacity-50">
-            <div></div><button id="mUp" class="bg-gray-800/50 p-4 border border-green-500/30 rounded"><i class="fas fa-chevron-up"></i></button><div></div>
-            <button id="mLeft" class="bg-gray-800/50 p-4 border border-green-500/30 rounded"><i class="fas fa-chevron-left"></i></button>
-            <button id="mDown" class="bg-gray-800/50 p-4 border border-green-500/30 rounded"><i class="fas fa-chevron-down"></i></button>
-            <button id="mRight" class="bg-gray-800/50 p-4 border border-green-500/30 rounded"><i class="fas fa-chevron-right"></i></button>
+        
+        <!-- LARGER MOBILE CONTROLS -->
+        <div class="absolute bottom-16 right-8 grid grid-cols-3 gap-3 md:hidden z-20 w-64 opacity-60">
+            <div></div><button id="mUp" class="bg-gray-800/80 p-6 border-2 border-green-500/50 rounded-xl active:bg-green-500/50 transition-colors"><i class="fas fa-chevron-up text-2xl"></i></button><div></div>
+            <button id="mLeft" class="bg-gray-800/80 p-6 border-2 border-green-500/50 rounded-xl active:bg-green-500/50 transition-colors"><i class="fas fa-chevron-left text-2xl"></i></button>
+            <button id="mDown" class="bg-gray-800/80 p-6 border-2 border-green-500/50 rounded-xl active:bg-green-500/50 transition-colors"><i class="fas fa-chevron-down text-2xl"></i></button>
+            <button id="mRight" class="bg-gray-800/80 p-6 border-2 border-green-500/50 rounded-xl active:bg-green-500/50 transition-colors"><i class="fas fa-chevron-right text-2xl"></i></button>
         </div>
     </div>
 
@@ -508,22 +510,75 @@
             ctx.fillStyle='#050505'; ctx.fillRect(0,0,canvas.width,canvas.height);
             ctx.save(); ctx.translate(-camera.x,-camera.y);
             
-            ctx.strokeStyle='#112211'; ctx.lineWidth=1; ctx.beginPath();
-            const sc=Math.floor(camera.x/TILE_SIZE), ec=sc+(canvas.width/TILE_SIZE)+1, sr=Math.floor(camera.y/TILE_SIZE), er=sr+(canvas.height/TILE_SIZE)+1;
-            for(let x=sc;x<=ec;x++) { if(x>=0&&x<=MAP_SIZE) { ctx.moveTo(x*TILE_SIZE,camera.y); ctx.lineTo(x*TILE_SIZE,camera.y+canvas.height); } }
-            for(let y=sr;y<=er;y++) { if(y>=0&&y<=MAP_SIZE) { ctx.moveTo(camera.x,y*TILE_SIZE); ctx.lineTo(camera.x+canvas.width,y*TILE_SIZE); } }
-            ctx.stroke();
+            // --- FESTIVE BOUNDARY (Lights) ---
+            const borderW = MAP_SIZE * TILE_SIZE;
+            const borderH = MAP_SIZE * TILE_SIZE;
+            const lights = ['#ff003c', '#0f0', '#fff']; // Red, Green, White
             
-            ctx.strokeStyle='#00ff00'; ctx.lineWidth=2; ctx.strokeRect(0,0,MAP_SIZE*TILE_SIZE,MAP_SIZE*TILE_SIZE);
-            
-            ctx.fillStyle='#555'; walls.forEach(w=>ctx.fillRect(w.x*TILE_SIZE,w.y*TILE_SIZE,TILE_SIZE,TILE_SIZE));
-            ctx.fillStyle='rgba(188,19,254,0.2)'; glitches.forEach(g=>ctx.fillRect(g.x*TILE_SIZE,g.y*TILE_SIZE,g.w*TILE_SIZE,g.h*TILE_SIZE));
+            // Subtle boundary line
+            ctx.strokeStyle = '#114411'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, borderW, borderH);
+
+            // Draw lights
+            for(let x=0; x<MAP_SIZE; x+=2) {
+                ctx.fillStyle = lights[(x/2)%3];
+                ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
+                ctx.fillRect(x*TILE_SIZE, -4, TILE_SIZE, 4); // Top
+                ctx.fillRect(x*TILE_SIZE, borderH, TILE_SIZE, 4); // Bottom
+            }
+            for(let y=0; y<MAP_SIZE; y+=2) {
+                ctx.fillStyle = lights[(y/2)%3];
+                ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
+                ctx.fillRect(-4, y*TILE_SIZE, 4, TILE_SIZE); // Left
+                ctx.fillRect(borderW, y*TILE_SIZE, 4, TILE_SIZE); // Right
+            }
+            ctx.shadowBlur = 0;
+
+            // --- SNOWY WALLS ---
+            walls.forEach(w => {
+                ctx.fillStyle = '#555';
+                ctx.fillRect(w.x * TILE_SIZE, w.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                // Snow cap
+                ctx.fillStyle = '#eee';
+                ctx.fillRect(w.x * TILE_SIZE, w.y * TILE_SIZE, TILE_SIZE, 6);
+            });
+
+            // --- TRANSPARENT GLITCHES ---
+            ctx.fillStyle = 'rgba(188, 19, 254, 0.05)'; // Very faint
+            ctx.strokeStyle = 'rgba(188, 19, 254, 0.2)';
+            glitches.forEach(g => {
+                ctx.fillRect(g.x*TILE_SIZE, g.y*TILE_SIZE, g.w*TILE_SIZE, g.h*TILE_SIZE);
+                ctx.strokeRect(g.x*TILE_SIZE, g.y*TILE_SIZE, g.w*TILE_SIZE, g.h*TILE_SIZE);
+            });
+
             ctx.fillStyle='#fff'; ctx.shadowBlur=10; ctx.shadowColor='#fff'; foods.forEach(f=>{ctx.beginPath();ctx.arc(f.x*TILE_SIZE+12.5,f.y*TILE_SIZE+12.5,8,0,Math.PI*2);ctx.fill();});
             if(specialFood){ ctx.fillStyle='#00f3ff'; ctx.shadowColor='#00f3ff'; ctx.shadowBlur=20; ctx.beginPath(); ctx.arc(specialFood.x*TILE_SIZE+12.5,specialFood.y*TILE_SIZE+12.5,12+Math.sin(Date.now()/100)*2,0,Math.PI*2); ctx.fill();}
             
+            // --- SNAKE WITH HAT ---
             snake.forEach((p,i)=>{
                 ctx.fillStyle=i===0?'#0f0':'#0a0'; ctx.shadowBlur=i===0?15:0; ctx.shadowColor='#0f0';
                 ctx.fillRect(p.x*TILE_SIZE+1,p.y*TILE_SIZE+1,23,23);
+                
+                // Santa Hat on Head
+                if(i===0) {
+                    ctx.save();
+                    ctx.translate(p.x*TILE_SIZE, p.y*TILE_SIZE);
+                    // Trim
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(0, -6, TILE_SIZE, 6);
+                    // Hat
+                    ctx.fillStyle = '#d00';
+                    ctx.beginPath();
+                    ctx.moveTo(0, -6);
+                    ctx.lineTo(TILE_SIZE, -6);
+                    ctx.lineTo(TILE_SIZE/2, -20);
+                    ctx.fill();
+                    // Pom
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(TILE_SIZE/2, -20, 4, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.restore();
+                }
             });
             
             ctx.fillStyle='#ff003c'; ctx.shadowBlur=0;
@@ -543,13 +598,43 @@
             nextVelocity=v;
         }
         
-        // FIX: Added safety check for e.key to prevent "undefined" errors
         window.onkeydown = e => {
             if (e && e.key && e.key.startsWith('Arrow')) {
                 e.preventDefault();
                 handleKey(e.key);
             }
         };
+
+        // --- SWIPE LOGIC ---
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        canvas.addEventListener('touchstart', function(e) {
+            touchStartX = e.changedTouches[0].screenX;
+            touchStartY = e.changedTouches[0].screenY;
+            e.preventDefault(); 
+        }, {passive: false});
+
+        canvas.addEventListener('touchmove', function(e) {
+            e.preventDefault(); 
+        }, {passive: false});
+
+        canvas.addEventListener('touchend', function(e) {
+            let touchEndX = e.changedTouches[0].screenX;
+            let touchEndY = e.changedTouches[0].screenY;
+            handleSwipe(touchStartX, touchStartY, touchEndX, touchEndY);
+            e.preventDefault();
+        }, {passive: false});
+
+        function handleSwipe(sx, sy, ex, ey) {
+            let dx = ex - sx;
+            let dy = ey - sy;
+            if(Math.abs(dx) > Math.abs(dy)) {
+                if(Math.abs(dx) > 30) handleKey(dx > 0 ? 'ArrowRight' : 'ArrowLeft');
+            } else {
+                if(Math.abs(dy) > 30) handleKey(dy > 0 ? 'ArrowDown' : 'ArrowUp');
+            }
+        }
 
         document.getElementById('mUp').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowUp')};
         document.getElementById('mDown').ontouchstart=(e)=>{e.preventDefault();handleKey('ArrowDown')};
